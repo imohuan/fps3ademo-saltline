@@ -63,11 +63,16 @@ import rawDetailed from "../src/world/props/detailed-builders.js?raw";
 import rawCharacter from "../src/world/props/character-builders.js?raw";
 import rawLibrary from "../src/audio/library.js?raw";
 import rawSynthesis from "../src/audio/synthesis.js?raw";
+import rawStudioProp from "./studio-prop.js?raw";
 import {
   HemisphereLight,
   DirectionalLight,
   Box3,
 } from "../src/vendor/three-r180.js";
+import {
+  STUDIO_PROP_NAME,
+  createStudioProp,
+} from "./studio-prop.js";
 
 for (let [k, b] of [
   ["container20", (c, o) => buildBasicContainer(c, "container20", o)],
@@ -90,6 +95,7 @@ for (let [k, b] of [
 registerDetailedProps(registerProp);
 registerCharacterProps(registerProp);
 registerCargoProps(registerProp);
+registerProp(STUDIO_PROP_NAME, createStudioProp);
 
 // ---------- shared context for the game factories ----------
 const canvas = document.getElementById("view");
@@ -256,7 +262,11 @@ const CATEGORIES = [
     id: "props",
     label: "Props",
     build: (name) => propNode(name),
-    names: () => Object.keys(PROP_SIZES),
+    names: () => {
+      const base = Object.keys(PROP_SIZES);
+      // studio prop lives in the list even though it has no PROP_SIZES entry
+      return base.includes(STUDIO_PROP_NAME) ? base : [...base, STUDIO_PROP_NAME];
+    },
     code: (name) => propSource(name),
   },
   {
@@ -304,7 +314,7 @@ const CATEGORIES = [
     actions: () => ["fire", "reload", "ads"],
     code: () => [
       ["src/weapons/weapon.js", "createWeapon", "State machine: fire / reload / ADS / recoil"],
-      ["src/weapons/rig.js", "function", "Receiver, rail and sight geometry"],
+      ["src/weapons/rig.js", "N_", "Receiver, rail and sight geometry"],
     ],
   },
   {
@@ -313,8 +323,8 @@ const CATEGORIES = [
     names: () => context.audio.names,
     build: null, // audio exhibits render a speaker stand
     code: () => [
-      ["src/audio/library.js", "var Go = {", "Sound catalog: name -> generator + mix settings"],
-      ["src/audio/synthesis.js", "function Av", "Biquad filter design used by every generator"],
+      ["src/audio/library.js", "Go", "Sound catalog: name -> generator + mix settings"],
+      ["src/audio/synthesis.js", "Av", "Biquad filter design used by every generator"],
     ],
   },
 ];
@@ -333,6 +343,7 @@ const RAW = {
   "src/world/props/cargo-builders.js": rawCargo,
   "src/world/props/detailed-builders.js": rawDetailed,
   "src/world/props/character-builders.js": rawCharacter,
+  "inspector/studio-prop.js": rawStudioProp,
   "src/audio/library.js": rawLibrary,
   "src/audio/synthesis.js": rawSynthesis,
 };
@@ -343,22 +354,120 @@ async function rawSource(path) {
 // pull one named function/block out of a source file
 function extractBlock(src, anchor) {
   if (!src) return null;
-  const at = src.indexOf(anchor);
+  const name = anchor
+    .replace(/^(?:async\s+)?(?:function\s+|const\s+|let\s+|var\s+|class\s+)/, "")
+    .trim();
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const decl = new RegExp(
+    "^(?:async\\s+)?(?:function\\s+|const\\s+|let\\s+|var\\s+|class\\s+)" +
+      escaped +
+      "\\b",
+    "m",
+  );
+  const declMatch = src.match(decl);
+  const at = declMatch ? declMatch.index : src.indexOf(name);
   if (at < 0) return null;
-  // start at the beginning of the declaration line
-  const lineStart = src.lastIndexOf("\n", at) + 1;
-  let i = src.indexOf("{", at);
-  if (i < 0) return null;
+  const lineStart = src.lastIndexOf(String.fromCharCode(10), at) + 1;
+  // skip the identifier itself so a default value like "t = {}" cannot be
+  // mistaken for the body
+  return extractBlockFrom(src, lineStart, at + name.length);
+}
+
+function extractBlockFrom(src, lineStart, from) {
+  const bodyOpen = findBodyOpen(src, from);
+  if (bodyOpen < 0) {
+    const eol = src.indexOf(String.fromCharCode(10), from);
+    return src.slice(lineStart, eol < 0 ? src.length : eol + 1);
+  }
+  const bodyClose = matchBrace(src, bodyOpen);
+  if (bodyClose < 0) return src.slice(lineStart);
+  return src.slice(lineStart, bodyClose + 1);
+}
+
+function skipAtomic(src, i) {
+  const ch = src[i];
+  const next = src[i + 1];
+  const tick = String.fromCharCode(96);
+  if (ch === "/" && next === "/") {
+    const nl = src.indexOf(String.fromCharCode(10), i);
+    return nl < 0 ? src.length : nl;
+  }
+  if (ch === "/" && next === "*") {
+    const end = src.indexOf("*/", i + 2);
+    return end < 0 ? src.length : end + 2;
+  }
+  if (ch === '"' || ch === "'" || ch === tick) {
+    let j = i + 1;
+    while (j < src.length) {
+      if (src[j] === String.fromCharCode(92)) {
+        j += 2;
+        continue;
+      }
+      if (src[j] === ch) return j + 1;
+      j++;
+    }
+    return src.length;
+  }
+  return i;
+}
+
+// The body always follows the parameter list. Skipping the parens first keeps
+// default values such as "opts = {}" from being read as the body.
+function findBodyOpen(src, from) {
+  let i = from;
+  let paramOpen = -1;
+  while (i < src.length) {
+    const next = skipAtomic(src, i);
+    if (next > i) {
+      i = next;
+      continue;
+    }
+    if (src[i] === "(") {
+      paramOpen = i;
+      break;
+    }
+    // no parameter list at all: the brace right here starts the body
+    if (src[i] === "{") return i;
+    if (src[i] === ";") return -1;
+    i++;
+  }
+  if (paramOpen >= 0) {
+    const close = matchBrace(src, paramOpen);
+    if (close < 0) return -1;
+    i = close + 1;
+  }
+  while (i < src.length) {
+    const ch = src[i];
+    const next = skipAtomic(src, i);
+    if (next > i) {
+      i = next;
+      continue;
+    }
+    if (ch === "{") return i;
+    if (ch === ";") return -1;
+    i++;
+  }
+  return -1;
+}
+
+function matchBrace(src, open) {
+  const openCh = src[open];
+  const closeCh = openCh === "{" ? "}" : ")";
   let depth = 0;
-  for (let j = i; j < src.length; j++) {
-    const ch = src[j];
-    if (ch === "{") depth++;
-    else if (ch === "}") {
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    const next = skipAtomic(src, i);
+    if (next > i) {
+      i = next - 1;
+      continue;
+    }
+    if (ch === openCh) depth++;
+    else if (ch === closeCh) {
       depth--;
-      if (depth === 0) return src.slice(lineStart, j + 1);
+      if (depth === 0) return i;
     }
   }
-  return src.slice(lineStart);
+  return -1;
 }
 
 // props share a handful of builder functions; map each prop to its real factory
@@ -380,20 +489,55 @@ const PROP_BUILDER = {
   reefer_unit: ["basic-builders", "function buildReeferUnit"],
   sign_post: ["basic-builders", "function buildSignPost"],
   floodlight_stand: ["basic-builders", "function buildFloodlightStand"],
+  // cargo-builders.js
+  forklift: ["cargo-builders", "function oR"],
+  generator: ["cargo-builders", "function rR"],
+  dumpster: ["cargo-builders", "function aR"],
+  toolbox_cart: ["cargo-builders", "function lR"],
+  // detailed-builders.js
+  barrel: ["detailed-builders", "function S1"],
+  pallet: ["detailed-builders", "function VA"],
+  pallet_stack: ["detailed-builders", "function WA"],
+  crate_wood: ["detailed-builders", "function GA"],
+  crate_stack: ["detailed-builders", "function qA"],
+  ibc_tote: ["detailed-builders", "function XA"],
+  cable_reel: ["detailed-builders", "function YA"],
+  tire_stack: ["detailed-builders", "function $A"],
+  jerry_can: ["detailed-builders", "function ZA"],
+  traffic_cone: ["detailed-builders", "function jA"],
+  gas_cylinders: ["detailed-builders", "function JA"],
+  pipe_stack: ["detailed-builders", "function KA"],
+  // character-builders.js
+  tarp_cargo: ["character-builders", "function QA"],
+  sandbags: ["character-builders", "function tR"],
+  cardboard_boxes: ["character-builders", "function nR"],
 };
 
 function propSource(name) {
   const entry = PROP_BUILDER[name];
-  const out = [
-    ["src/world/props/registry.js", "var PROP_SIZES", "Footprint, material and surface"],
-  ];
+  if (name === STUDIO_PROP_NAME) {
+    return [["inspector/studio-prop.js", "createStudioProp", "Live-edit studio prop (HMR target)"]];
+  }
+  const out = [];
   if (entry) {
     out.push([
       "src/world/props/" + entry[0] + ".js",
       entry[1],
       "Builder implementation for " + name,
     ]);
+  } else {
+    out.push([
+      "src/world/props/register.js",
+      "registerProp",
+      "Registration order for " + name + " (builder not mapped)",
+    ]);
   }
+  // registry last: it is a long lookup table, the builder is what you came for
+  out.push([
+    "src/world/props/registry.js",
+    "var PROP_SIZES",
+    "Footprint, material and surface for " + name,
+  ]);
   return out;
 }
 
@@ -424,7 +568,7 @@ const listEl = document.getElementById("list");
 const searchEl = document.getElementById("search");
 const stageInfo = document.getElementById("stage-info");
 const codeView = document.getElementById("code-view");
-const codeFile = document.getElementById("code-file");
+const codeTabs = document.getElementById("code-tabs");
 const actTitle = document.getElementById("act-title");
 const actRow = document.getElementById("act-row");
 const chipsEl = document.getElementById("chips");
@@ -769,13 +913,47 @@ function highlight(src) {
 }
 
 let codeToken = 0;
+let codeChunks = [];
+let codeActive = 0;
+
+function paintCode(i) {
+  const c = codeChunks[i];
+  if (!c) return;
+  codeActive = i;
+  codeTabs.querySelectorAll(".code-tab").forEach(function (b, n) {
+    b.classList.toggle("on", n === i);
+  });
+  codeView.innerHTML =
+    '<span class="com">/* ' +
+    escapeHtml(c.path) +
+    " - " +
+    escapeHtml(c.note) +
+    " */</span>\n" +
+    highlight(c.block);
+  codeView.scrollTop = 0;
+}
+
+function paintCodeTabs() {
+  codeTabs.innerHTML = "";
+  codeChunks.forEach(function (c, i) {
+    const b = document.createElement("button");
+    b.className = "code-tab" + (i === codeActive ? " on" : "");
+    b.textContent = c.path.replace(/^src\//, "");
+    b.title = c.path;
+    b.addEventListener("click", function () {
+      paintCode(i);
+    });
+    codeTabs.appendChild(b);
+  });
+}
+
 async function renderCode() {
   const token = ++codeToken;
-  codeFile.textContent = "-";
+  codeTabs.innerHTML = "";
   codeView.textContent = current ? "Loading source..." : "Select an asset.";
   if (!current || !current.def || !current.def.code) return;
   const parts = current.def.code(current.name);
-  const chunks = [];
+  const found = [];
   for (let i = 0; i < parts.length; i++) {
     const path = parts[i][0];
     const anchor = parts[i][1];
@@ -785,30 +963,18 @@ async function renderCode() {
     if (!src) continue;
     const block = extractBlock(src, anchor);
     if (!block || block.length < 40) continue;
-    chunks.push({ path: path, note: note, block: block });
+    found.push({ path: path, note: note, block: block });
   }
   if (token !== codeToken) return;
-  if (!chunks.length) {
-    codeFile.textContent = "source unavailable";
+  if (!found.length) {
     codeView.textContent = "No source block matched this asset.";
     return;
   }
-  codeFile.textContent = chunks.map(function (c) { return c.path; }).join("  /  ");
-  codeView.innerHTML = chunks
-    .map(function (c) {
-      return (
-        '<span class="com">/* ' +
-        escapeHtml(c.path) +
-        " - " +
-        escapeHtml(c.note) +
-        " */</span>\n" +
-        highlight(c.block)
-      );
-    })
-    .join("\n\n");
-  codeView.scrollTop = 0;
+  codeChunks = found;
+  codeActive = 0;
+  paintCodeTabs();
+  paintCode(0);
 }
-
 
 // ---------- top-level pane tabs ----------
 function setPane(name) {
@@ -875,7 +1041,18 @@ bootStep("Generating procedural materials", 0.2);
 buildChips();
 await buildList((t) => bootStep("Rendering asset thumbnails", 0.25 + t * 0.65));
 bootStep("Ready", 1);
-select("props", "container20");
+// restore the last viewed asset from ?asset=cat:name, else default
+const wanted = new URLSearchParams(location.search).get("asset");
+let restored = false;
+if (wanted && wanted.includes(":")) {
+  const [cat, name] = wanted.split(":");
+  const def = CATEGORIES.find((c) => c.id === cat);
+  if (def && def.names().includes(name)) {
+    select(cat, name);
+    restored = true;
+  }
+}
+if (!restored) select("props", "container20");
 requestAnimationFrame(frame);
 setTimeout(() => bootEl && bootEl.classList.add("done"), 380);
 
@@ -898,23 +1075,52 @@ window.__INSPECT = () => {
   };
 };
 
-function clearMount() {
-  while (mount.children.length) {
-    const c = mount.children[0];
-    mount.remove(c);
-  }
-  currentAction = null;
-  currentActionBtn = null;
+// ---------- live edit: rebuild when the studio prop file changes ----------
+if (import.meta.hot) {
+  // accept BOTH import paths: main.js pulls the factory and the ?raw source.
+  // Missing either one makes Vite bubble the update up to a full page reload.
+  import.meta.hot.accept(
+    ["./studio-prop.js", "./studio-prop.js?raw"],
+    async ([mod, raw]) => {
+      if (mod) registerProp(STUDIO_PROP_NAME, mod.createStudioProp);
+      if (raw) {
+        const text = typeof raw === "string" ? raw : raw.default;
+        if (typeof text === "string") RAW["inspector/studio-prop.js"] = text;
+      }
+      if (!mod) return;
+      try {
+        const fresh = await import("./studio-prop.js?raw");
+        RAW["inspector/studio-prop.js"] =
+          typeof fresh === "string" ? fresh : fresh.default;
+      } catch {}
+      await buildList();
+      if (
+        current &&
+        current.cat === "props" &&
+        current.name === STUDIO_PROP_NAME
+      ) {
+        select("props", STUDIO_PROP_NAME);
+      }
+      stageInfo.textContent = "studio-prop.js reloaded (no page reload)";
+      setTimeout(function () {
+        stageInfo.textContent = current ? current.cat + " / " + current.name : "";
+      }, 2200);
+    },
+  );
 }
 
+// ---------- selection ----------
 function select(cat, name) {
-  clearMount();
   if (current && current.actor) {
     try {
       current.actor._deactivate();
     } catch {}
   }
+  while (mount.children.length) mount.remove(mount.children[0]);
+  currentAction = null;
+  currentActionBtn = null;
   const def = CATEGORIES.find((c) => c.id === cat);
+  if (!def) return;
   let node = null;
   let actor = null;
   if (cat === "audio") {
@@ -925,21 +1131,23 @@ function select(cat, name) {
     actor = built.actor || null;
   }
   mount.add(node);
-  current = { cat, name, node, actor, def, framed: false };
+  current = { cat, name, node, actor, def };
   frameObject(node);
   renderActions();
   renderCode();
   updateListSelection();
   stageInfo.textContent = cat + " / " + name;
+  // remember the pick in the URL so a refresh restores it
+  const url = new URL(location.href);
+  url.searchParams.set("asset", cat + ":" + name);
+  history.replaceState(null, "", url);
 }
 
-// point the orbit camera at the object and pick a distance that fits it
 function frameObject(node) {
   node.updateMatrixWorld(true);
   const box = new Box3().setFromObject(node);
   let size = box.getSize(new Vector3());
   let center = box.getCenter(new Vector3());
-  // skinned rigs use a fixed oversized bounding sphere; clamp to a sane frame
   const longest = Math.max(size.x, size.y, size.z);
   if (!Number.isFinite(longest) || longest < 0.2 || longest > 30) {
     size = new Vector3(2.2, 1.6, 2.2);
