@@ -2,8 +2,8 @@
 // Edit this file and the inspector rebuilds the exhibit instantly via HMR.
 // Available materials: context.mats.get(name) with names like paint_teal,
 // steel_galv, wood_pallet, concrete_dirty. Helpers come from core/geometry.
-import { Group } from "../src/vendor/three-r180.js";
-import { boxGeometry, cylinderGeometry, createMesh } from "../src/core/geometry.js";
+import { Group } from "../../src/vendor/three-r180.js";
+import { boxGeometry, createMesh } from "../../src/core/geometry.js";
 
 // tweak these numbers and watch the exhibit change
 const CONFIG = {
@@ -15,9 +15,9 @@ const CONFIG = {
   name: "STUDIO-01",
 };
 
-export const STUDIO_PROP_NAME = "studio_prop";
+export const NAME = "Studio Vehicle";
 
-export function createStudioProp(context) {
+export function create(context) {
   const root = new Group();
   const mat = context.mats.get(CONFIG.bodyColor);
   const steel = context.mats.get("steel_dark");
@@ -70,10 +70,10 @@ export function createStudioProp(context) {
     root.add(lamp);
   }
 
-  // a red roof over the cab, added during the live-edit test
+  // a teal roof over the cab, live-edit test
   const roof = createMesh(
     boxGeometry(CONFIG.bodySize[0] * 0.9, 0.06, CONFIG.bodySize[2] * 0.9),
-    context.mats.get("paint_red"),
+    context.mats.get("paint_teal"),
   );
   roof.position.set(0, CONFIG.bodySize[1] + 0.06, 0);
   root.add(roof);

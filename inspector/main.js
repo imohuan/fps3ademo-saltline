@@ -63,16 +63,47 @@ import rawDetailed from "../src/world/props/detailed-builders.js?raw";
 import rawCharacter from "../src/world/props/character-builders.js?raw";
 import rawLibrary from "../src/audio/library.js?raw";
 import rawSynthesis from "../src/audio/synthesis.js?raw";
-import rawStudioProp from "./studio-prop.js?raw";
+import rawDocsReadme from "./docs/README.md?raw";
+import rawDocsDrawing from "./docs/api-drawing.md?raw";
+import rawDocsMaterials from "./docs/api-materials.md?raw";
+import rawDocsAnimation from "./docs/api-animation.md?raw";
+import rawDocsAudioRigs from "./docs/api-audio-and-rigs.md?raw";
 import {
   HemisphereLight,
   DirectionalLight,
   Box3,
 } from "../src/vendor/three-r180.js";
-import {
-  STUDIO_PROP_NAME,
-  createStudioProp,
-} from "./studio-prop.js";
+
+// ---------- studio: live-edit assets discovered from inspector/studio/*.js --
+// import.meta.glob gives Vite two superpowers here:
+//   1. dropping a new .js file into studio/ makes it appear without touching
+//      this file (the glob re-evaluates on HMR)
+//   2. editing any of them hot-reloads just that module
+const studioModules = import.meta.glob("./studio/*.js");
+const studioRegistry = new Map(); // path -> { fileName, name, create, update }
+
+async function refreshStudioModules() {
+  for (const [path, loader] of Object.entries(studioModules)) {
+    try {
+      const mod = await loader();
+      const create = mod.create || mod.default;
+      if (typeof create !== "function") {
+        console.warn("[studio] " + path + " exports no create(context)");
+        continue;
+      }
+      const fileName = path.split("/").pop().replace(/\.js$/, "");
+      studioRegistry.set(path, {
+        path,
+        fileName,
+        name: mod.NAME || fileName,
+        create,
+        update: typeof mod.update === "function" ? mod.update : null,
+      });
+    } catch (e) {
+      console.warn("[studio] failed to load " + path, e);
+    }
+  }
+}
 
 for (let [k, b] of [
   ["container20", (c, o) => buildBasicContainer(c, "container20", o)],
@@ -95,7 +126,6 @@ for (let [k, b] of [
 registerDetailedProps(registerProp);
 registerCharacterProps(registerProp);
 registerCargoProps(registerProp);
-registerProp(STUDIO_PROP_NAME, createStudioProp);
 
 // ---------- shared context for the game factories ----------
 const canvas = document.getElementById("view");
@@ -263,11 +293,29 @@ const CATEGORIES = [
     label: "Props",
     build: (name) => propNode(name),
     names: () => {
-      const base = Object.keys(PROP_SIZES);
-      // studio prop lives in the list even though it has no PROP_SIZES entry
-      return base.includes(STUDIO_PROP_NAME) ? base : [...base, STUDIO_PROP_NAME];
+      return Object.keys(PROP_SIZES);
     },
     code: (name) => propSource(name),
+  },
+  {
+    id: "studio",
+    label: "Studio",
+    names: () =>
+      [...studioRegistry.values()].map((e) => studioDisplayName(e)),
+    build: (name) => {
+      const entry = [...studioRegistry.values()].find(
+        (e) => studioDisplayName(e) === name,
+      );
+      if (!entry) throw new Error("studio asset gone: " + name);
+      const node = entry.create(context);
+      return { node, entry };
+    },
+    code: (name) => {
+      const entry = [...studioRegistry.values()].find(
+        (e) => studioDisplayName(e) === name,
+      );
+      return entry ? [[entry.path, "create", "Studio live-edit source"]] : [];
+    },
   },
   {
     id: "actors",
@@ -343,11 +391,11 @@ const RAW = {
   "src/world/props/cargo-builders.js": rawCargo,
   "src/world/props/detailed-builders.js": rawDetailed,
   "src/world/props/character-builders.js": rawCharacter,
-  "inspector/studio-prop.js": rawStudioProp,
   "src/audio/library.js": rawLibrary,
   "src/audio/synthesis.js": rawSynthesis,
 };
 async function rawSource(path) {
+  if (path.startsWith("inspector/studio/")) return RAW[path] || null;
   return RAW[path] || null;
 }
 
@@ -515,9 +563,6 @@ const PROP_BUILDER = {
 
 function propSource(name) {
   const entry = PROP_BUILDER[name];
-  if (name === STUDIO_PROP_NAME) {
-    return [["inspector/studio-prop.js", "createStudioProp", "Live-edit studio prop (HMR target)"]];
-  }
   const out = [];
   if (entry) {
     out.push([
@@ -581,6 +626,81 @@ function bootStep(text, t) {
 }
 import { GUIDE_HTML } from "./guide.js";
 document.getElementById("guide-body").innerHTML = GUIDE_HTML;
+
+// Embedded doc viewer: clicking a row in the guide's docs-table renders the
+// matching inspector/docs/*.md (imported above as ?raw) into #doc-body.
+const RAW_DOCS = {
+  "README.md": rawDocsReadme,
+  "api-drawing.md": rawDocsDrawing,
+  "api-materials.md": rawDocsMaterials,
+  "api-animation.md": rawDocsAnimation,
+  "api-audio-and-rigs.md": rawDocsAudioRigs,
+};
+
+function mdToHtml(md) {
+  const esc = (s) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s) =>
+    esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  let out = "";
+  let inCode = false;
+  let codeBuf = [];
+  for (const line of md.split("\n")) {
+    if (line.trim().startsWith("```")) {
+      if (inCode) {
+        out += "<pre>" + esc(codeBuf.join("\n")) + "</pre>";
+        codeBuf = [];
+        inCode = false;
+      } else {
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      continue;
+    }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      const lvl = Math.min(h[1].length + 2, 5);
+      out += "<h" + lvl + ">" + inline(h[2]) + "</h" + lvl + ">";
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      out += '<p class="md-li">• ' + inline(line.replace(/^\s*[-*]\s+/, "")) + "</p>";
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      out += '<p class="md-li">' + inline(line) + "</p>";
+      continue;
+    }
+    if (!line.trim()) continue;
+    out += "<p>" + inline(line) + "</p>";
+  }
+  if (inCode && codeBuf.length) out += "<pre>" + esc(codeBuf.join("\n")) + "</pre>";
+  return out;
+}
+
+const docBody = document.getElementById("doc-body");
+const docViewport = document.getElementById("doc-viewport");
+const docsTable = document.querySelector("#guide-body .docs-table");
+if (docsTable && docBody) {
+  for (const row of docsTable.querySelectorAll("tr")) {
+    row.classList.add("doc-row");
+    const file = row.cells[0] ? row.cells[0].textContent.trim() : "";
+    row.addEventListener("click", () => {
+      const raw = RAW_DOCS[file];
+      if (!raw) return;
+      for (const other of docsTable.querySelectorAll("tr")) other.classList.remove("on");
+      row.classList.add("on");
+      if (docViewport) docViewport.textContent = file;
+      docBody.innerHTML = mdToHtml(raw);
+      docBody.scrollTop = 0;
+    });
+  }
+}
 
 let current = null; // { cat, name, node, actor, actions }
 let currentAction = null;
@@ -1038,6 +1158,7 @@ function frame() {
 
 // ---------- boot ----------
 bootStep("Generating procedural materials", 0.2);
+await refreshStudioModules();
 buildChips();
 await buildList((t) => bootStep("Rendering asset thumbnails", 0.25 + t * 0.65));
 bootStep("Ready", 1);
@@ -1075,41 +1196,39 @@ window.__INSPECT = () => {
   };
 };
 
-// ---------- live edit: rebuild when the studio prop file changes ----------
+// ---------- live edit: studio/*.js hot reload (no page reload) ----------
 if (import.meta.hot) {
-  // accept BOTH import paths: main.js pulls the factory and the ?raw source.
-  // Missing either one makes Vite bubble the update up to a full page reload.
-  import.meta.hot.accept(
-    ["./studio-prop.js", "./studio-prop.js?raw"],
-    async ([mod, raw]) => {
-      if (mod) registerProp(STUDIO_PROP_NAME, mod.createStudioProp);
-      if (raw) {
-        const text = typeof raw === "string" ? raw : raw.default;
-        if (typeof text === "string") RAW["inspector/studio-prop.js"] = text;
+  // Re-run the glob on any studio change: new files are discovered, edited
+  // files re-register. Accepting the glob itself keeps the update local.
+  import.meta.hot.accept(async () => {
+    await refreshStudioModules();
+    // pick up fresh source text for the Code pane
+    const raws = import.meta.glob("./studio/*.js?raw", { eager: false });
+    for (const [path, entry] of studioRegistry) {
+      if (raws[path]) {
+        try {
+          const mod = await raws[path]();
+          const text = typeof mod === "string" ? mod : mod.default;
+          if (typeof text === "string") RAW[path] = text;
+        } catch {}
       }
-      if (!mod) return;
-      try {
-        const fresh = await import("./studio-prop.js?raw");
-        RAW["inspector/studio-prop.js"] =
-          typeof fresh === "string" ? fresh : fresh.default;
-      } catch {}
-      await buildList();
-      if (
-        current &&
-        current.cat === "props" &&
-        current.name === STUDIO_PROP_NAME
-      ) {
-        select("props", STUDIO_PROP_NAME);
-      }
-      stageInfo.textContent = "studio-prop.js reloaded (no page reload)";
-      setTimeout(function () {
-        stageInfo.textContent = current ? current.cat + " / " + current.name : "";
-      }, 2200);
-    },
-  );
+    }
+    await buildList();
+    if (current && current.cat === "studio") {
+      select("studio", current.name);
+    }
+    stageInfo.textContent = "studio reloaded (no page reload)";
+    setTimeout(function () {
+      stageInfo.textContent = current ? current.cat + " / " + current.name : "";
+    }, 2200);
+  });
 }
 
 // ---------- selection ----------
+function studioDisplayName(entry) {
+  return "studio_" + entry.fileName;
+}
+
 function select(cat, name) {
   if (current && current.actor) {
     try {
@@ -1137,7 +1256,6 @@ function select(cat, name) {
   renderCode();
   updateListSelection();
   stageInfo.textContent = cat + " / " + name;
-  // remember the pick in the URL so a refresh restores it
   const url = new URL(location.href);
   url.searchParams.set("asset", cat + ":" + name);
   history.replaceState(null, "", url);
