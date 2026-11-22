@@ -77,6 +77,16 @@ function createGameFlow(context) {
     },
     l = createMenus(context, {
       deploy() {
+        let picked = document.querySelector(".scene-card.selected");
+        let scene = picked && picked.dataset.scene === "gallery" ? "gallery" : "";
+        if (scene && !context.galleryMap) {
+          location.href = "?scene=gallery&autostart=1";
+          return;
+        }
+        if (!scene && context.galleryMap) {
+          location.href = location.pathname;
+          return;
+        }
         (a(context.audio, "resume"), r.requestLock(), U({}));
       },
       resume() {
@@ -220,6 +230,16 @@ function createGameFlow(context) {
     );
   }
   function z(P) {
+    if (context.galleryMap) {
+      // static menu camera aimed down the exhibit line, no looping flight
+      let Z = context.camera;
+      (Z.position.set(-14, 6, -10),
+        Z.lookAt(0, 1, 14),
+        Math.abs(Z.fov - 55) > 0.01 &&
+          ((Z.fov = 55), Z.updateProjectionMatrix()),
+        (e.fade = 0));
+      return;
+    }
     let V = Math.max(26, E.len / GAME_FLOW.titleSpeed);
     ((E.t += P), E.t >= V && (E.t = 0));
     let Y = E.t / V,
@@ -344,7 +364,9 @@ function createGameFlow(context) {
     ((n.enabled = !0),
       o.show(!0),
       r.setGameplay && r.setGameplay(!0),
-      o.setObjective(D()),
+      context.galleryMap
+        ? o.setObjective && o.setObjective("Browse the exhibit line")
+        : o.setObjective(D()),
       M("playing"),
       C(!0));
   }
@@ -483,6 +505,7 @@ function createGameFlow(context) {
     return L;
   }
   function ie() {
+    if (context.galleryMap) return; // no enemies in the gallery
     let P = (s.playerStart && s.playerStart.pos) || n.pos;
     for (let V of ["gull", "hound"])
       for (let Y = 0; Y < GAME_FLOW.patrol[V]; Y++)
@@ -617,6 +640,7 @@ function createGameFlow(context) {
     return P;
   }
   function ue(P) {
+    if (context.galleryMap) return; // no relays, no extraction
     let V = n.alive ? $() : null;
     for (let L of c.relays)
       L.cut ||
@@ -813,7 +837,11 @@ function createGameFlow(context) {
     a(context.weapon, "setVisible", !1),
     r.setGameplay && r.setGameplay(!1),
     a(context.audio, "setIntensity", 0.15),
-    context.params.shot || context.params.autostart || l.show("title"),
+    (context.galleryMap && !context.params.title
+      ? (l.show("none"), _.start({ skipIntro: !0 }))
+      : context.params.shot ||
+          context.params.autostart ||
+          l.show("title")),
     _
   );
 }

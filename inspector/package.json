@@ -1,0 +1,8 @@
+{
+  "name": "saltline-inspector",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  }
+}

@@ -1200,6 +1200,51 @@ body {
   text-align: left;
   padding-left: 18px;
 }
+.m-scene-pick {
+  display: flex;
+  gap: 10px;
+  margin-top: clamp(14px, 2.6vh, 24px);
+}
+.scene-card {
+  appearance: none;
+  cursor: pointer;
+  text-align: left;
+  font: 500 12px/1.4 var(--f-label);
+  letter-spacing: 0.06em;
+  color: var(--bone);
+  background: rgba(11, 13, 15, 0.55);
+  border: 1px solid rgba(232, 228, 218, 0.32);
+  border-radius: 0;
+  padding: 10px 14px 9px;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.scene-card:hover {
+  border-color: rgba(232, 228, 218, 0.7);
+  background: rgba(232, 228, 218, 0.08);
+}
+.scene-card.selected {
+  border-color: var(--signal);
+  background: rgba(222, 172, 30, 0.14);
+}
+.scene-card .sc-name {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.scene-card .sc-desc {
+  font: 400 11px/1.45 var(--f-mono);
+  color: var(--steel);
+}
+.scene-card.selected .sc-desc {
+  color: rgba(232, 228, 218, 0.85);
+}
 .menu button:focus-visible,
 .menu input:focus-visible {
   outline: 2px solid var(--signal);

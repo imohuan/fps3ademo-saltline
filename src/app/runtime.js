@@ -10,6 +10,7 @@ import { createMaterials } from "../render/materials/materials.js";
 import { createPhysics } from "../world/physics.js";
 import { createProps } from "../world/props/props.js";
 import { createLevel } from "../world/level/level.js";
+import { createGallery } from "../world/props/gallery.js";
 import { createBackdrop } from "../world/backdrop/backdrop.js";
 import { createGround } from "../world/ground/ground.js";
 import { createEffects } from "../effects/effects.js";
@@ -48,6 +49,8 @@ async function startGame() {
   let showcaseName =
     params.show && SHOWCASE_MODULES[params.show] ? params.show : null;
   context.showcase = showcaseName;
+  let galleryMap = params.scene === "gallery";
+  context.galleryMap = galleryMap;
   let cameraOverride = null;
   function setShot(h) {
     if (h.cam) {
@@ -167,13 +170,24 @@ async function startGame() {
   } else {
     if (
       (await setBootProgress("Stacking containers", 0.34),
-      await initializeSystem("level", "level", () => createLevel(context), !0),
-      await setBootProgress("Raising the cranes", 0.5),
-      await initializeSystem("backdrop", "backdrop", () =>
-        createBackdrop(context),
-      ),
-      await setBootProgress("Flooding the apron", 0.58),
-      await initializeSystem("ground", "ground", () => createGround(context)),
+      galleryMap ||
+        (await initializeSystem(
+          "level",
+          "level",
+          () => createLevel(context),
+          !0,
+        )),
+      galleryMap
+        ? ((context.backdrop = FALLBACKS.backdrop()),
+          (context.ground = FALLBACKS.ground()))
+        : (await setBootProgress("Raising the cranes", 0.5),
+          await initializeSystem("backdrop", "backdrop", () =>
+            createBackdrop(context),
+          ),
+          await setBootProgress("Flooding the apron", 0.58),
+          await initializeSystem("ground", "ground", () =>
+            createGround(context),
+          )),
       context.ground.stub)
     ) {
       let h = createMesh(
@@ -185,7 +199,25 @@ async function startGame() {
       );
       context.scene.add(h);
     }
-    (context.physics.build(),
+    (galleryMap &&
+      ((context.gallery = await createGallery(context)),
+      (context.level = {
+        stub: true,
+        playerStart: context.gallery.playerStart,
+        objectives: [],
+        enemySpawns: [],
+        zones: [],
+        interiorBoxes: [],
+        cinematicPath: [],
+        extraction: null,
+        groundSurfaceAt: () => "concrete",
+        update() {},
+      }),
+      (context.physics.bounds.min.z = -20),
+      (context.physics.bounds.max.z = context.gallery.gridDepth + 30),
+      (context.physics.bounds.min.x = -14),
+      (context.physics.bounds.max.x = 40)),
+    context.physics.build(),
       await setBootProgress("Loading tracers and smoke", 0.66),
       await initializeSystem("fx", "fx", () => createEffects(context)),
       await initializeSystem("audio", "audio", () =>
@@ -280,16 +312,7 @@ async function startGame() {
           console.error("[loop] game.update threw: " + ((v && v.stack) || v)));
       }
       if (showcaseName) {
-        if (context.showcaseInfo.update)
-          try {
-            context.showcaseInfo.update(p);
-          } catch (v) {
-            updateSystem.err.sc ||
-              ((updateSystem.err.sc = 1),
-              console.error(
-                "[loop] showcase update threw: " + ((v && v.stack) || v),
-              ));
-          }
+        // handled after cameraOverride so animated showcases can win
       } else
         d &&
           (updateSystem("player", p),
@@ -327,6 +350,19 @@ async function startGame() {
         cameraOverride &&
           (context.camera.position.copy(cameraOverride.pos),
           context.camera.lookAt(cameraOverride.look)),
+        showcaseName &&
+          context.showcaseInfo.update &&
+          (() => {
+            try {
+              context.showcaseInfo.update(p);
+            } catch (v) {
+              updateSystem.err.sc ||
+                ((updateSystem.err.sc = 1),
+                console.error(
+                  "[loop] showcase update threw: " + ((v && v.stack) || v),
+                ));
+            }
+          })(),
         context.bench && context.bench.frame(f));
       try {
         context.render.frame(p);

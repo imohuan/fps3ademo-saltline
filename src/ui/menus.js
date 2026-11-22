@@ -80,6 +80,16 @@ function createMenus(context, e) {
         <div class="m-eyebrow"><span class="m-tag">B4</span><span>Port Authority Breach Unit</span><span class="m-dim">Saltline Terminal \xB7 05:42</span></div>
         <h1 class="m-word">SALTLINE</h1>
         <p class="m-premise">The port\u2019s security net has gone feral. Cut its three uplinks. Reach the boat.</p>
+        <div class="m-scene-pick" role="radiogroup" aria-label="Mission selection">
+          <button class="scene-card selected" data-scene="terminal" role="radio" aria-checked="true">
+            <span class="sc-name">Saltline Terminal</span>
+            <span class="sc-desc">Cut three relays. Reach the boat.</span>
+          </button>
+          <button class="scene-card" data-scene="gallery" role="radio" aria-checked="false">
+            <span class="sc-name">The Gallery</span>
+            <span class="sc-desc">No mission. Walk the line, inspect every asset.</span>
+          </button>
+        </div>
         <div class="m-actions">
           <button class="btn primary" data-act="deploy">Deploy</button>
           <button class="btn" data-act="settings">Settings</button>
@@ -310,6 +320,16 @@ function createMenus(context, e) {
     }
     if (T.dataset.tab) {
       z(T.dataset.tab);
+      return;
+    }
+    if (T.dataset.scene) {
+      let W = T.closest(".m-scene-pick");
+      W &&
+        W.querySelectorAll(".scene-card").forEach((K) => {
+          let on = K === T;
+          K.classList.toggle("selected", on);
+          K.setAttribute("aria-checked", String(on));
+        });
       return;
     }
     let D = T.dataset.act;

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Saltline Asset Inspector</title>
+    <link rel="stylesheet" href="../src/fonts.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+      <div id="boot">
+        <div class="boot-mark">ASSET INSPECTOR</div>
+        <div class="boot-sub" id="boot-msg">Raising the terminal</div>
+        <div class="boot-bar"><i id="boot-fill"></i></div>
+      </div>
+      <aside id="panel">
+        <header class="p-head">
+          <div class="p-title">ASSET INSPECTOR</div>
+        </header>
+        <nav class="p-tabs" role="tablist">
+          <button class="p-tab active" data-pane="browse" role="tab">Browse</button>
+          <button class="p-tab" data-pane="code" role="tab">Code</button>
+          <button class="p-tab" data-pane="guide" role="tab">Guide</button>
+        </nav>
+        <section class="pane" data-pane="browse">
+          <div class="pane-head">
+            <input id="search" type="search" placeholder="Filter assets..." autocomplete="off" />
+            <div class="chips" id="chips"></div>
+          </div>
+          <nav id="list"></nav>
+          <div class="pane-foot">
+            <div class="d-title" id="act-title">—</div>
+            <div class="act-row" id="act-row"></div>
+          </div>
+        </section>
+        <section class="pane" data-pane="code" hidden>
+          <div class="pane-head"><div class="code-file" id="code-file">—</div></div>
+          <pre class="code-view" id="code-view"></pre>
+        </section>
+        <section class="pane doc" data-pane="guide" hidden id="guide-body"></section>
+      </aside>
+      <div id="stage-info"></div>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
